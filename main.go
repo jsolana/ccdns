@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 )
 
 type config struct {
@@ -54,6 +55,16 @@ func runCmd(w io.Writer, c config) error {
 	if err != nil {
 		return err
 	}
+
+	// Setup signal handling for graceful shutdown
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt)
+	go func() {
+		<-signalCh
+		// Initiate graceful shutdown
+		fmt.Println("Bye bye ;-)")
+		os.Exit(0)
+	}()
 
 	// Start listening for UDP packages on the given address
 	conn, err := net.ListenUDP("udp", udpAddr)

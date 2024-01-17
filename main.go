@@ -4,9 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
+
+	"github.com/miekg/dns"
 )
 
 type config struct {
@@ -27,12 +28,12 @@ func main() {
 	}
 }
 
-func parseArgs(w io.Writer, args []string) (config, error) {
+func parseArgs(w io.Writer, args []string) (*config, error) {
 	c := config{}
 	fs := flag.NewFlagSet("ccdns", flag.ContinueOnError)
 	fs.SetOutput(w)
 	fs.IntVar(&c.port, "p", 53, "Port where thet server will listen for incoming requests")
-	fs.StringVar(&c.host, "h", "localhost", "Host where thet server will listen for incoming requests")
+	fs.StringVar(&c.host, "h", "", "Host where thet server will listen for incoming requests")
 	fs.Usage = func() {
 		var usageString = `ccdns is a DNS Forwarder used to resolve DNS queries instead of directly using the authoritative nameserver chain.
 		
@@ -43,19 +44,12 @@ func parseArgs(w io.Writer, args []string) (config, error) {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
-		return c, err
+		return &c, err
 	}
-	return c, nil
+	return &c, nil
 }
 
-func runCmd(w io.Writer, c config) error {
-	// Resolve the string address to a UDP address
-	udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", c.host, c.port))
-
-	if err != nil {
-		return err
-	}
-
+func runCmd(w io.Writer, c *config) error {
 	// Setup signal handling for graceful shutdown
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt)
@@ -66,28 +60,51 @@ func runCmd(w io.Writer, c config) error {
 		os.Exit(0)
 	}()
 
-	// Start listening for UDP packages on the given address
-	conn, err := net.ListenUDP("udp", udpAddr)
-	defer conn.Close()
+	handler := new(dnsHandler)
+	server := &dns.Server{
+		Addr:      fmt.Sprintf("%s:%d", c.host, c.port),
+		Net:       "udp",
+		Handler:   handler,
+		UDPSize:   65535,
+		ReusePort: true,
+	}
 
-	fmt.Printf("server listening %s\n", conn.LocalAddr().String())
-
+	fmt.Printf("Starting DNS server on %v\n", server.Addr)
+	err := server.ListenAndServe()
 	if err != nil {
-		return err
+		fmt.Printf("Failed to start server: %s\n", err.Error())
+	}
+	return nil
+
+}
+
+type dnsHandler struct{}
+
+func (h *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	msg := new(dns.Msg)
+	msg.SetReply(r)
+	msg.Authoritative = true
+
+	for _, question := range r.Question {
+		//fmt.Printf("Received query: %s\n", question.Name)
+		answers := resolve(question.Name, question.Qtype)
+		msg.Answer = append(msg.Answer, answers...)
 	}
 
-	// Read from UDP listener in endless loop
-	for {
-		var buf [512]byte
-		_, _, err := conn.ReadFromUDP(buf[0:]) // adr
-		if err != nil {
-			return err
-		}
+	w.WriteMsg(msg)
+}
 
-		// MSG received
-		// fmt.Println("> ", string(buf[0:]))
-		fmt.Println("MSG received")
-		// Write back the message over UPD
-		//conn.WriteToUDP([]byte("Hello UDP Client\n"), addr)
+func resolve(domain string, qtype uint16) []dns.RR {
+	m := new(dns.Msg)
+	m.SetQuestion(dns.Fqdn(domain), qtype)
+	m.RecursionDesired = true
+
+	c := new(dns.Client)
+	in, _, err := c.Exchange(m, "8.8.8.8:53")
+	if err != nil {
+		fmt.Println(err)
+		return nil
 	}
+
+	return in.Answer
 }

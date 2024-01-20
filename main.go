@@ -32,8 +32,8 @@ func parseArgs(w io.Writer, args []string) (*config, error) {
 	c := config{}
 	fs := flag.NewFlagSet("ccdns", flag.ContinueOnError)
 	fs.SetOutput(w)
-	fs.IntVar(&c.port, "p", 53, "Port where thet server will listen for incoming requests")
-	fs.StringVar(&c.host, "h", "", "Host where thet server will listen for incoming requests")
+	fs.IntVar(&c.port, "p", 53, "Port where the server will listen for incoming requests")
+	fs.StringVar(&c.host, "h", "", "Host where the server will listen for incoming requests")
 	fs.Usage = func() {
 		var usageString = `ccdns is a DNS Forwarder used to resolve DNS queries instead of directly using the authoritative nameserver chain.
 		
